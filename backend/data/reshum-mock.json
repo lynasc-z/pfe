@@ -1,0 +1,180 @@
+{
+  "employees": {
+    "SH-EP-0901": {
+      "employeeId": "SH-EP-0901",
+      "fullName": "Tarik Benamara",
+      "department": "Exploration & Production",
+      "position": "Petroleum Engineer",
+      "managerEmployeeId": "SH-MGR-0001",
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    },
+    "SH-EP-0902": {
+      "employeeId": "SH-EP-0902",
+      "fullName": "Samira Belkacem",
+      "department": "Exploration & Production",
+      "position": "Geophysicist",
+      "managerEmployeeId": "SH-MGR-0001",
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    },
+    "SH-FIN-0201": {
+      "employeeId": "SH-FIN-0201",
+      "fullName": "Rachid Tebboune",
+      "department": "Finance & Accounting",
+      "position": "Senior Auditor",
+      "managerEmployeeId": "SH-MGR-0002",
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    },
+    "SH-IT-0301": {
+      "employeeId": "SH-IT-0301",
+      "fullName": "Charaf Benyahia",
+      "department": "Information Technology",
+      "position": "DevOps Engineer",
+      "managerEmployeeId": "SH-MGR-0003",
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    },
+    "SH-MGR-0005": {
+      "employeeId": "SH-MGR-0005",
+      "fullName": "Abdelkader Sahraoui",
+      "department": "Logistics & Supply Chain",
+      "position": "Logistics Manager",
+      "managerEmployeeId": null,
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    },
+    "SH-LOG-0101": {
+      "employeeId": "SH-LOG-0101",
+      "fullName": "Nesrine Hamdi",
+      "department": "Logistics & Supply Chain",
+      "position": "Supply Chain Analyst",
+      "managerEmployeeId": "SH-MGR-0005",
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    },
+    "SH-LOG-0102": {
+      "employeeId": "SH-LOG-0102",
+      "fullName": "Farid Gueroudj",
+      "department": "Logistics & Supply Chain",
+      "position": "Warehouse Supervisor",
+      "managerEmployeeId": "SH-MGR-0005",
+      "balances": {
+        "annual": {
+          "total": 30,
+          "used": 0
+        },
+        "recovery": {
+          "total": 5,
+          "used": 0
+        },
+        "sick": {
+          "total": 15,
+          "used": 0
+        },
+        "maternity": {
+          "total": 0,
+          "used": 0
+        }
+      }
+    }
+  },
+  "lastUpdated": "2026-05-13T13:05:11.928Z"
+}

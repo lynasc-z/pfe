@@ -1,0 +1,5 @@
+-- Rename Role enum value DRH → ADMIN
+ALTER TYPE "Role" RENAME VALUE 'DRH' TO 'ADMIN';
+
+-- Rename LeaveStatus enum value PENDING_DRH → PENDING_ADMIN
+ALTER TYPE "LeaveStatus" RENAME VALUE 'PENDING_DRH' TO 'PENDING_ADMIN';

@@ -1,0 +1,330 @@
+// =============================================================================
+// Sonatrach Leave Management System — Prisma Schema
+// =============================================================================
+//
+// System:   Internal HR leave management for Sonatrach employees
+// Database: PostgreSQL
+// ORM:      Prisma Client (JavaScript/TypeScript)
+//
+// ── MODELS ────────────────────────────────────────────────────────────────────
+//   User              All system users. Roles: EMPLOYEE, MANAGER, HR, ADMIN
+//   LeaveType         Leave type catalogue with business rules and quotas
+//   LeaveBalance      Per-user, per-year quota tracker (total vs. used days)
+//   LeaveRequest      A single leave request from submission to completion
+//   RequestAction     Immutable audit log of every action taken on a request
+//   Notification      In-app alerts delivered to individual users
+//   BalanceAdjustment Admin-only manual corrections to a user's balance
+//
+// ── APPROVAL WORKFLOW ─────────────────────────────────────────────────────────
+//
+//   [EMPLOYEE submits]
+//         │
+//         ▼
+//   PENDING_MANAGER  ──(manager rejects)──▶  REJECTED_BY_MANAGER
+//         │
+//   (manager approves)
+//         │
+//         ▼
+//   PENDING_ADMIN    ──(admin assigns HR)──▶  PENDING_HR_ACCEPT
+//         │                                          │
+//         │                                  (HR accepts)
+//         │                                          │
+//         ▼                                          ▼
+//   PENDING_HR  ◀──────────────────────────────────────
+//         │
+//   (HR processes)
+//         ├──(needs doc)──▶  AWAITING_DOCUMENT ──(doc received)──┐
+//         │                                                        │
+//         ▼◀───────────────────────────────────────────────────────┘
+//   RESERVED
+//         │
+//   (HR finalises)
+//         │
+//         ▼
+//     TREATED  ✓ (complete)
+//
+//   At any stage: employee may CANCEL → CANCELLED
+//
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The role a user holds in the system.
+/// Controls which dashboards and actions are available to them.
+enum Role {
+  EMPLOYEE  // Standard employee — can submit and track own leave requests
+  MANAGER   // Team manager — approves/rejects requests from their direct reports
+  HR        // HR officer — processes approved requests (reserve & treat)
+  ADMIN     // HR director — assigns requests to HR officers and manages balances
+}
+
+/// Biological sex stored per user, used to enforce gender-restricted leave types
+/// (e.g. Maternity = FEMALE only, Paternity = MALE only).
+enum Gender {
+  MALE
+  FEMALE
+}
+
+/// Controls how leave-type allowances are counted and reset.
+enum QuotaScope {
+  ANNUAL          // Resets every calendar year (e.g. Annual Leave: 30 days/year)
+  PER_OCCURRENCE  // Each event gets its own fixed allowance (e.g. Paternity: 3 days per birth)
+  ONCE_PER_CAREER // May only be taken once in the employee's entire career (e.g. Pilgrimage)
+  UNLIMITED       // No quota limit — approved at manager's discretion (e.g. Mission Leave)
+}
+
+/// Whether leave days are counted in business days or calendar days.
+enum DurationUnit {
+  BUSINESS_DAYS  // Weekends and public holidays are excluded from the count
+  CALENDAR_DAYS  // Every day counts (used for Maternity Leave: 150 calendar days)
+}
+
+/// The current stage of a leave request in the approval pipeline.
+/// See the workflow diagram at the top of this file.
+enum LeaveStatus {
+  PENDING_MANAGER     // Newly submitted; waiting for the employee's manager to act
+  APPROVED_BY_MANAGER // Manager has approved; transitional state before admin acts
+  PENDING_ADMIN       // Awaiting the Admin/HR Director to assign the request to an HR officer
+  PENDING_HR_ACCEPT   // HR officer notified; waiting for them to accept the assignment
+  PENDING_HR          // Assigned and accepted; HR officer is actively processing it
+  RESERVED            // HR has reserved the leave dates in the system
+  AWAITING_DOCUMENT   // HR requested a supporting document from the employee
+  TREATED             // Fully processed — the request is closed
+  REJECTED_BY_MANAGER // Manager rejected the request
+  CANCELLED           // Employee cancelled the request before it was fully processed
+}
+
+/// The type of action recorded in the audit log (RequestAction).
+enum ActionType {
+  APPROVE           // Manager or HR approved the request
+  REJECT            // Manager or HR rejected the request
+  RESERVE           // HR reserved the leave dates
+  TREAT             // HR marked the request as fully treated/processed
+  CANCEL            // Employee or admin cancelled the request
+  REASSIGN          // Admin reassigned the request to a different HR officer
+  ADJUST_BALANCE    // Admin manually corrected a leave balance
+  ASSIGN            // Admin assigned the request to a specific HR officer
+  EDIT              // User or admin edited request details
+  REQUEST_DOCUMENT  // HR requested a supporting document from the employee
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Represents every person who can log into the system, regardless of role.
+/// Employees, managers, HR officers, and the admin are all stored in this table.
+/// Soft-delete is supported via `deletedAt` — deleted users are never removed from
+/// the database so that historical leave requests remain intact.
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique                // Corporate email used to log in
+  passwordHash String    @map("password_hash")  // bcrypt hash — never store plain text
+  fullName     String    @map("full_name")
+  role         Role      @default(EMPLOYEE)
+  department   String                           // E.g. "Exploration & Production"
+  position     String                           // E.g. "Senior Petroleum Engineer"
+  employeeId   String    @unique @map("employee_id") // Internal HR code (e.g. SH-EP-0892)
+  managerId    String?   @map("manager_id")     // FK → User; null for managers/HR/admin
+  gender       Gender?                          // Required for gender-restricted leave types
+  createdAt    DateTime  @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")     // Soft-delete timestamp; null = active account
+
+  // Relations
+  manager            User?               @relation("ManagerEmployees", fields: [managerId], references: [id])
+  employees          User[]              @relation("ManagerEmployees")
+  leaveBalances      LeaveBalance[]
+  leaveRequests      LeaveRequest[]
+  actions            RequestAction[]
+  notifications      Notification[]
+  reservedRequests   LeaveRequest[]      @relation("ReservedRequests")
+  assignedRequests   LeaveRequest[]      @relation("AssignedRequests")
+  adjustedBalances   BalanceAdjustment[] @relation("AdjustedUser")
+  balanceAdjustments BalanceAdjustment[] @relation("AdjusterUser")
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAVE TYPE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Defines a category of leave (e.g. "Annual Leave", "Maternity Leave").
+/// Each type carries business rules: quota scope, fixed duration, document
+/// requirements, gender restrictions, and day-counting method.
+///
+/// Seeded types (Algerian labour law compliant):
+///   Annual Leave       — 30 business days / year
+///   Justified Absence  — Unlimited, requires certificate
+///   Death of Relative  — 3 business days per bereavement
+///   Maternity Leave    — 150 calendar days, FEMALE only
+///   Paternity Leave    — 3 business days, MALE only
+///   Mission Leave      — Unlimited, requires order
+///   Pilgrimage Leave   — 30 business days, once per career
+///   Marriage Leave     — 15 business days, once per career
+///   Circumcision Leave — 3 business days per occurrence
+model LeaveType {
+  id                String       @id @default(uuid())
+  name              String       @unique
+  maxDays           Int?         @map("max_days")         // Annual quota cap (null if fixed or unlimited)
+  requiresDocument  Boolean      @default(false) @map("requires_document") // Must employee upload a PDF?
+  quotaScope        QuotaScope   @default(ANNUAL) @map("quota_scope")
+  fixedDuration     Int?         @map("fixed_duration")   // Exact length when law mandates it (e.g. 3 days)
+  durationUnit      DurationUnit @default(BUSINESS_DAYS) @map("duration_unit")
+  genderRestriction Gender?      @map("gender_restriction") // null = available to all
+  cooldownDays      Int?         @map("cooldown_days")    // Minimum gap between two uses (e.g. 365 for Maternity)
+
+  leaveBalances LeaveBalance[]
+  leaveRequests LeaveRequest[]
+
+  @@map("leave_types")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAVE BALANCE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tracks how many leave days of a given type a user has for a specific year.
+/// Only quota-bounded leave types (ANNUAL, PER_OCCURRENCE, ONCE_PER_CAREER) have
+/// balance rows. UNLIMITED types do not need balance tracking.
+///
+/// remainingDays = totalDays − usedDays  (computed in application layer)
+model LeaveBalance {
+  id          String @id @default(uuid())
+  userId      String @map("user_id")
+  leaveTypeId String @map("leave_type_id")
+  year        Int                      // Calendar year this balance applies to
+  totalDays   Int    @map("total_days") // Allowance for the year (set at year start or by admin)
+  usedDays    Int    @default(0) @map("used_days") // Days consumed by TREATED requests
+
+  user      User      @relation(fields: [userId], references: [id])
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([userId, leaveTypeId, year]) // One balance record per user per type per year
+  @@map("leave_balances")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAVE REQUEST
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A single leave request submitted by an employee. Tracks the full lifecycle
+/// from submission through manager approval, admin routing, HR processing, and
+/// final treatment. Extra fields capture type-specific details (mission info,
+/// wedding date, child birth info, etc.).
+model LeaveRequest {
+  id             String      @id @default(uuid())
+  userId         String      @map("user_id")        // The employee making the request
+  leaveTypeId    String      @map("leave_type_id")
+  startDate      DateTime    @map("start_date")
+  endDate        DateTime    @map("end_date")
+  daysCount      Int         @map("days_count")     // Pre-calculated using business/calendar rules
+  reason         String?                            // Optional free-text justification
+  recoveryDate   DateTime?   @map("recovery_date")  // Used for Mission Leave: expected return date
+  documentPath   String?     @map("document_path")  // Server path to uploaded supporting PDF
+  status         LeaveStatus @default(PENDING_MANAGER)
+  reservedById   String?     @map("reserved_by_id") // HR officer who reserved this request
+  assignedHrId   String?     @map("assigned_hr_id") // HR officer assigned by admin to process it
+
+  // Mission Leave — additional details required for official mission orders
+  missionType  String?   @map("mission_type") // E.g. "Field Inspection", "Conference"
+  transport    String?                        // Mode of transport (train, plane, car…)
+  itinerary    String?                        // Route description
+  destination  String?                        // City/site of the mission
+
+  // Event-specific fields (used for event-based leave types)
+  weddingDate    DateTime? @map("wedding_date")     // Marriage Leave: ceremony date
+  childBirthDate DateTime? @map("child_birth_date") // Paternity / Circumcision Leave
+  childName      String?   @map("child_name")       // Circumcision Leave: child's name
+  relationship   String?                            // Death Leave: relation to deceased
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  // Relations
+  user          User            @relation(fields: [userId], references: [id])
+  leaveType     LeaveType       @relation(fields: [leaveTypeId], references: [id])
+  reservedBy    User?           @relation("ReservedRequests", fields: [reservedById], references: [id])
+  assignedHr    User?           @relation("AssignedRequests", fields: [assignedHrId], references: [id])
+  actions       RequestAction[]
+  notifications Notification[]
+
+  @@map("leave_requests")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REQUEST ACTION  (Audit Log)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Immutable audit trail: every time someone acts on a leave request (approve,
+/// reject, assign, treat, etc.) a row is appended here. Records are never updated
+/// or deleted, providing a full history of who did what and when.
+model RequestAction {
+  id        String     @id @default(uuid())
+  requestId String     @map("request_id")
+  actorId   String     @map("actor_id")  // The user who performed the action
+  action    ActionType
+  comment   String?                      // Optional note explaining the decision
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  request LeaveRequest @relation(fields: [requestId], references: [id])
+  actor   User         @relation(fields: [actorId], references: [id])
+
+  @@map("request_actions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// In-app notification delivered to a specific user when a leave request changes
+/// status or when an action requires their attention. Optionally linked to the
+/// request that triggered it so the UI can deep-link directly to it.
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")    // Recipient
+  requestId String?  @map("request_id") // Optional: the request this notification is about
+  message   String                      // Human-readable notification text
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User          @relation(fields: [userId], references: [id])
+  request LeaveRequest? @relation(fields: [requestId], references: [id])
+
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BALANCE ADJUSTMENT  (Admin override)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Records a manual correction to a user's leave balance made by the Admin.
+/// Both `deltaTotal` (changing the allowance) and `deltaUsed` (correcting consumed
+/// days) are supported. Positive delta = add days; negative delta = remove days.
+/// Every adjustment must include a reason for the audit trail.
+model BalanceAdjustment {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")     // The employee whose balance is being adjusted
+  adjustedBy String   @map("adjusted_by") // The admin who made the change
+  year       Int                          // Which year's balance is affected
+  deltaTotal Int      @default(0) @map("delta_total") // Change to total allowance (+/-)
+  deltaUsed  Int      @default(0) @map("delta_used")  // Change to used days (+/-)
+  reason     String                       // Mandatory justification for the adjustment
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User @relation("AdjustedUser", fields: [userId],     references: [id])
+  adjuster User @relation("AdjusterUser", fields: [adjustedBy], references: [id])
+
+  @@map("balance_adjustments")
+}
